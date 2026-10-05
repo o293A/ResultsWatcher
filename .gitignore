@@ -1,0 +1,8 @@
+# Build output
+/target/
+
+# Runtime files created next to the executable
+/screens/
+watcher.log
+watcher.log.1
+*.png.tmp

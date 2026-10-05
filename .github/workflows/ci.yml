@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: cargo test --release
+      - name: Build
+        run: cargo build --release
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ResultsWatcher-windows-x64
+          path: target/release/ResultsWatcher.exe
