@@ -1,4 +1,4 @@
-//! Pure state machine: SEARCHING -> STABILIZING -> CAPTURING -> CAPTURED -> CLOSING -> SEARCHING.
+//! Pure state machine: SEARCHING -> CAPTURING -> CAPTURED -> CLOSING -> SEARCHING.
 //! One capture per panel opening. Time is injected (ms) so it is fully unit-testable.
 
 use crate::detect::Banner;
@@ -11,7 +11,7 @@ pub enum Obs {
     /// used to know the panel is still there; it can never cause a capture.
     Other,
     /// Panel open with the Stats tab active.
-    Stats { banner: Banner, rows: bool, hdr: (u8, u16) },
+    Stats { banner: Banner, rows: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,7 +26,6 @@ pub enum Action {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     Searching,
-    Stabilizing,
     Capturing,
     Captured,
     Closing,
@@ -34,10 +33,6 @@ pub enum State {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Params {
-    /// Consecutive identical checks needed (2..3).
-    pub stable_checks: u8,
-    /// Max wait for the tooltip bubble to settle before capturing anyway.
-    pub bubble_wait_ms: u64,
     /// Consecutive absent checks that mean "closed".
     pub close_checks: u8,
     pub max_capture_attempts: u8,
@@ -45,16 +40,13 @@ pub struct Params {
 
 impl Default for Params {
     fn default() -> Self {
-        Params { stable_checks: 3, bubble_wait_ms: 3000, close_checks: 3, max_capture_attempts: 3 }
+        Params { close_checks: 3, max_capture_attempts: 3 }
     }
 }
 
 pub struct Machine {
     p: Params,
     pub state: State,
-    stable: u8,
-    since_ms: u64,
-    last: Option<Obs>,
     missing: u8,
     attempts: u8,
     captured_banner: Option<Banner>,
@@ -63,18 +55,11 @@ pub struct Machine {
     rows_cycle: bool,
 }
 
-fn hdr_close(a: (u8, u16), b: (u8, u16)) -> bool {
-    (a.0 as i32 - b.0 as i32).abs() <= 2 && (a.1 as i32 - b.1 as i32).abs() <= 6
-}
-
 impl Machine {
     pub fn new(p: Params) -> Machine {
         Machine {
             p,
             state: State::Searching,
-            stable: 0,
-            since_ms: 0,
-            last: None,
             missing: 0,
             attempts: 0,
             captured_banner: None,
@@ -86,10 +71,8 @@ impl Machine {
 
     fn reset_search(&mut self) {
         self.state = State::Searching;
-        self.stable = 0;
         self.missing = 0;
         self.attempts = 0;
-        self.last = None;
         self.captured_banner = None;
         self.banner_diff = 0;
         self.rows_missing = 0;
@@ -97,55 +80,16 @@ impl Machine {
     }
 
     /// Feed one observation (one detection pass).
-    pub fn on_observation(&mut self, obs: Obs, now_ms: u64) -> Action {
+    pub fn on_observation(&mut self, obs: Obs, _now_ms: u64) -> Action {
         match self.state {
             State::Searching => {
-                // Only a clear STATS observation starts anything. Rewards/Other/Absent: do nothing.
-                if let Obs::Stats { .. } = obs {
-                    self.state = State::Stabilizing;
-                    self.stable = 1;
-                    self.since_ms = now_ms;
-                    self.missing = 0;
-                    self.last = Some(obs);
-                }
-                Action::None
-            }
-            State::Stabilizing => {
-                let (banner, rows, hdr) = match obs {
-                    Obs::Stats { banner, rows, hdr } => (banner, rows, hdr),
-                    Obs::Other => {
-                        // Left the Stats tab before the capture happened: never capture.
-                        self.reset_search();
-                        return Action::None;
-                    }
-                    Obs::Absent => {
-                        // Tolerate one blip (cursor pass, tooltip): 2 misses in a row -> back.
-                        self.missing += 1;
-                        if self.missing >= 2 {
-                            self.reset_search();
-                        }
-                        return Action::None;
-                    }
-                };
-                self.missing = 0;
-                let same = match self.last {
-                    Some(Obs::Stats { banner: pb, hdr: ph, .. }) => pb == banner && hdr_close(ph, hdr),
-                    _ => false,
-                };
-                self.last = Some(obs);
-                if same && rows {
-                    self.stable += 1;
-                } else {
-                    self.stable = 1;
-                }
-                let waited = now_ms.saturating_sub(self.since_ms);
-                let settled = self.stable >= self.p.stable_checks;
-                // Bubble still animating after the max wait: capture anyway (needs a player row).
-                let give_up = waited >= self.p.bubble_wait_ms && rows;
-                if settled || give_up {
+                // The first clear STATS observation with a player row captures immediately.
+                // Rewards/Other/Absent (or no row yet): do nothing.
+                if let Obs::Stats { banner, rows: true } = obs {
                     self.state = State::Capturing;
                     self.captured_banner = Some(banner);
                     self.attempts = 1;
+                    self.missing = 0;
                     return Action::Capture;
                 }
                 Action::None
@@ -177,7 +121,7 @@ impl Machine {
                     self.missing = 0;
                     Action::None
                 }
-                Obs::Stats { banner, rows, .. } => {
+                Obs::Stats { banner, rows } => {
                     self.missing = 0;
                     // New game while the panel never closed: banner colour flipped (debounced)...
                     if let Some(cb) = self.captured_banner {
@@ -209,7 +153,7 @@ impl Machine {
             },
             State::Closing => {
                 self.reset_search();
-                self.on_observation(obs, now_ms)
+                self.on_observation(obs, _now_ms)
             }
         }
     }

@@ -42,12 +42,13 @@ A tiny, invisible Windows background program that automatically screenshots the 
 |---|---|
 | **Fully invisible** | No window, no console, no taskbar icon, no tray icon, not listed in Alt+Tab. One single process. |
 | **Panel only** | Only the exact RESULTS rectangle is read and saved. No full-screen file is ever written, not even a temporary one. |
+| **No mouse cursor** | The cursor is never part of the screenshot: the default Windows Graphics Capture session explicitly disables cursor capture, so the mouse (including the Roblox cursor) is left out of the image. |
 | **Stats tab only** | A screenshot is taken only when the **Stats** tab is active. Nothing is ever captured on the Rewards tab. |
-| **One capture per match** | Waits until the panel is stable and at least one player row is visible, then captures once. |
+| **One capture per match** | Captures as soon as the Stats tab is active and at least one player row is visible, once per opening. |
 | **Non-intrusive overlay** | Always on top, clicks and keystrokes pass straight through to the game, never takes focus. |
 | **Light on resources** | Event-driven, about 3 checks per second while Roblox is active, zero work while it is not. |
 | **Anti-lag design** | Below-normal priority, Windows efficiency mode (EcoQoS), lowest GPU thread priority. |
-| **Safe output** | Sequential `1.png`, `2.png`, ... written atomically (temporary file, then rename), never overwriting. |
+| **Safe output** | Timestamped `Screenshot_2026-10-06_070359.png` files written atomically (temporary file, then rename), never overwriting. |
 | **Single instance** | Launching it twice does nothing the second time. |
 
 Works with VICTORY and DEFEAT panels, any number of players (detection never depends on the rows content), windowed and fullscreen-windowed modes.
@@ -73,7 +74,7 @@ To check that it is running, open Task Manager and look for `ResultsWatcher.exe`
 | Step | What happens |
 |---|---|
 | 1. Start `ResultsWatcher.exe` | It waits silently. |
-| 2. Play. The RESULTS panel opens on **Stats** | After about a second of stability, the panel is captured and saved. |
+| 2. Play. The RESULTS panel opens on **Stats** | The panel is captured and saved immediately. |
 | 3. Overlay | `RESULTS FIND / SCREEN` and a thumbnail appear at the middle-right of the screen. |
 | 4. Close the panel | The overlay fades out and the program is ready for the next match. No restart needed. |
 | 5. Press **Esc** 3 times | `PROGRAM CLOSED` appears for 2 seconds, then the program exits. |
@@ -95,8 +96,6 @@ Everything works without any configuration. To customize, put a `config.toml` fi
 |---|---|---|
 | `output_dir` | `"screens"` | Output folder. Relative paths are relative to the executable; absolute paths are allowed. |
 | `poll_hz` | `3` | Detection passes per second while Roblox is in front (0.5 to 10). |
-| `stable_checks` | `3` | Identical checks required before capturing (2 to 5). |
-| `bubble_wait_ms` | `3000` | Maximum wait for the semi-transparent "Season..." bubble to settle before capturing anyway. |
 | `close_checks` | `3` | Consecutive "panel not found" checks that mean the panel was closed. |
 | `overlay_margin` | `24` | Distance from the right screen edge, in pixels at 1080p (scaled with resolution). |
 | `overlay_scale` | `1.0` | Extra size multiplier for the overlay (0.5 to 3). |
@@ -112,7 +111,7 @@ Everything works without any configuration. To customize, put a `config.toml` fi
 ## Output files
 
 - Screenshots go to the `screens` folder next to the executable (created automatically).
-- Files are named `1.png`, `2.png`, `3.png`, ... The numbering continues after the highest number already in the folder. Existing files are never overwritten.
+- Files are named like the native Windows screenshot tool: `Screenshot_YYYY-MM-DD_HHMMSS.png` (local date, then hour, minute, second), for example `Screenshot_2026-10-06_070359.png`. If two captures happen in the same second, the second one gets ` (2)`. Existing files are never overwritten.
 - Each file is written under a temporary name and renamed when complete, so another program watching the folder never reads a half-written image.
 - Each image is the exact native-resolution panel, with no cursor and no background.
 - A small log is kept in `watcher.log` next to the executable (size-capped and rotated). It is the first place to look if something does not work.
@@ -157,15 +156,15 @@ The panel position is not hard-coded: it is deduced from the window's client are
 
 ### Capture
 
-- **DXGI Desktop Duplication** on the monitor hosting Roblox (default). Windows never draws a yellow capture border with this API, whatever the Windows version. The cursor is not part of the duplicated image, and the overlay window is excluded from capture.
-- Optional: `capture = "window"` or `capture = "monitor"` in `config.toml` selects Windows Graphics Capture instead (a yellow border may appear). It is also used automatically if Desktop Duplication keeps failing.
+- **Windows Graphics Capture on the Roblox window** (default, `capture = "window"`). Cursor capture is explicitly disabled, so the mouse cursor is never part of the image. On Windows 11 the capture border is disabled when the system allows it; on other systems Windows may draw a yellow border around the window while it is captured.
+- Optional: `capture = "monitor"` captures the whole monitor with Windows Graphics Capture (cursor still excluded, panel cropped in memory), and `capture = "duplication"` selects DXGI Desktop Duplication (never a yellow border, but the mouse cursor may appear in the image on some setups).
 - Only tiny rectangles are copied from the GPU texture to the CPU for the tests. The full panel is read exactly once, at the final capture.
 - If window capture fails, it falls back to capturing the monitor and cropping the panel immediately in memory. The full screen is never written to disk.
 - PNG encoding runs on a separate low-priority thread.
 
 ### State machine
 
-`SEARCHING` -> `STABILIZING` (panel and Stats tab stable for a few checks, at least one player row visible, waiting for the "Season..." bubble to settle for up to 3 seconds) -> `CAPTURED` (one capture, overlay shown) -> `CLOSING` (panel absent for 3 checks, overlay fades out) -> `SEARCHING`.
+`SEARCHING` -> `CAPTURING` (Stats tab active and at least one player row visible: captured immediately) -> `CAPTURED` (one capture, overlay shown) -> `CLOSING` (panel absent for 3 checks, overlay fades out) -> `SEARCHING`.
 
 ### Overlay
 
@@ -190,7 +189,7 @@ These are design goals. To measure on your own machine, open Task Manager, go to
 
 ## Safety and anti-cheat
 
-- The program only uses **external screen capture** (Desktop Duplication) and a **separate overlay window**.
+- The program only uses **external screen capture** (Windows Graphics Capture) and a **separate overlay window**.
 - It does **not** inject DLLs, hook into Roblox, read its memory, or draw inside its rendering.
 - The only system hook is a `SetWinEventHook` notification subscription (out-of-process): Windows calls back into the program itself; nothing is loaded into Roblox.
 - Esc is observed with Raw Input and is never blocked or modified.
@@ -228,7 +227,7 @@ To run it: `.\target\release\ResultsWatcher.exe`
 cargo test --release
 ```
 
-The tests cover the pure logic: geometry and scale, the detection cascade on reference images (victory, defeat, windowed, cropped panel), robustness to a simulated mouse cursor and a simulated "Season..." bubble, false-positive protection, the state machine, the Esc x3 counter, configuration parsing, atomic sequential PNG output and overlay rendering. The reference images in `tests/fixtures` are cropped to the panel and have player names removed.
+The tests cover the pure logic: geometry and scale, the detection cascade on reference images (victory, defeat, windowed, cropped panel), robustness to a simulated mouse cursor, false-positive protection, the state machine, the Esc x3 counter, configuration parsing, atomic sequential PNG output and overlay rendering. The reference images in `tests/fixtures` are cropped to the panel and have player names removed.
 
 The Windows-specific parts (capture, overlay, Raw Input) are not covered by automated tests.
 
@@ -265,7 +264,7 @@ ResultsWatcher/
 |   |-- state.rs            State machine
 |   |-- esc.rs              Esc x3 counter
 |   |-- config.rs           config.toml parser
-|   |-- png_out.rs          Sequential atomic PNG writer
+|   |-- png_out.rs          Timestamped atomic PNG writer
 |   |-- render.rs           Overlay compositing (rounded rectangle, thumbnail)
 |   |-- logger.rs           Size-capped log file
 |   |-- debug_image.rs      --debug-image mode
@@ -285,8 +284,7 @@ ResultsWatcher/
 
 - **Tested resolution:** developed and verified on 1920x1080 (fullscreen-windowed and windowed). Other resolutions and aspect ratios use a deduced scale and a fallback search, but were not verified on real captures.
 - **Exclusive fullscreen:** capture falls back to the whole monitor (cropped in memory), but the overlay may not be visible above an exclusive-fullscreen game. Fullscreen-windowed (the Roblox default) is fully supported.
-- **Capture border:** none in the default mode (Desktop Duplication). The yellow border only exists with Windows Graphics Capture, which is now only a fallback.
-- **The "Season..." bubble:** it is part of the game's own rendering and cannot be removed from the capture. The program waits for it to settle (up to 3 seconds) and then captures anyway.
+- **Capture border:** the default mode (Windows Graphics Capture) may show a yellow border around the Roblox window on systems that cannot disable it (Windows 11 usually can). `capture = "duplication"` never shows one but may include the mouse cursor in the image.
 - **Tab switching:** the program assumes the panel header is identical on the Rewards tab, which it uses only to tell a tab switch from a closed panel.
 - **Language and theme:** detection relies on colors and layout, not on text, but a future Roblox UI redesign would require updating the measured geometry in `src/geometry.rs`.
 
@@ -295,7 +293,7 @@ ResultsWatcher/
 ## Troubleshooting
 
 **Nothing is captured.**
-Check `watcher.log` next to the executable. It should contain `start`, then `saved ...` after a capture. Make sure the panel is on the **Stats** tab and stays open for a couple of seconds.
+Check `watcher.log` next to the executable. It should contain `start`, then `saved ...` after a capture. Make sure the panel is on the **Stats** tab.
 
 **Store version of Roblox or a different process name.**
 Find the real process name while Roblox is open:

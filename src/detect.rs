@@ -26,8 +26,6 @@ pub struct Detection {
     pub rows: bool,
     /// Per-row colour classes (2 bits per row, 7 rows) + banner: the "content signature".
     pub sig: u32,
-    /// Summary of the PING/KD header zone (tooltip bubble animates it): (mean luma, bright px).
-    pub hdr: (u8, u16),
 }
 
 #[derive(Clone, Copy)]
@@ -44,7 +42,6 @@ enum K {
     RewFill,
     Dark,
     Row(u8),
-    Header,
 }
 
 struct Probe {
@@ -92,7 +89,6 @@ fn plan(l: &Layout) -> Vec<Probe> {
         let y0 = ROW_FIRST_Y + ROW_H * i as i32 + 4;
         v.push(Probe { r: vstrip(l, ROW_X + 8, y0, y0 + 30), k: K::Row(i) });
     }
-    v.push(Probe { r: l.rect(Rect::new(480, 233, 170, 13)), k: K::Header });
     v
 }
 
@@ -122,9 +118,6 @@ pub fn stage2<S: Sampler + ?Sized>(s: &S, l: &Layout) -> Option<Detection> {
     let (mut rw_top_t, mut rw_bot_t, mut rw_fill_t) = (false, false, false);
     let (mut bt_g, mut bt_r, mut bb_g, mut bb_r, mut bf_g, mut bf_r) = (0, 0, 0, 0, 0, 0);
     let mut rowcls = [0u32; 7];
-    let mut hdr_sum = 0f32;
-    let mut hdr_n = 0f32;
-    let mut hdr_bright = 0u16;
 
     for p in plan(l) {
         match p.k {
@@ -170,20 +163,6 @@ pub fn stage2<S: Sampler + ?Sized>(s: &S, l: &Layout) -> Option<Detection> {
                     0
                 };
             }
-            K::Header => {
-                for y in p.r.y..p.r.bottom() {
-                    for x in p.r.x..p.r.right() {
-                        if let Some(px) = s.get(x, y) {
-                            let lm = luma(px);
-                            hdr_sum += lm;
-                            hdr_n += 1.0;
-                            if lm > 150.0 {
-                                hdr_bright = hdr_bright.saturating_add(1);
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -217,8 +196,7 @@ pub fn stage2<S: Sampler + ?Sized>(s: &S, l: &Layout) -> Option<Detection> {
         Banner::Victory => 1 << 16,
         Banner::Defeat => 2 << 16,
     };
-    let hdr = if hdr_n > 0.0 { ((hdr_sum / hdr_n) as u8, hdr_bright) } else { (0, 0) };
-    Some(Detection { layout: *l, banner: Some(banner), rows, sig, hdr })
+    Some(Detection { layout: *l, banner: Some(banner), rows, sig })
 }
 
 /// Rectangle (frame pixels) read by `confirm_template`.

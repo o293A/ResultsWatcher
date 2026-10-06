@@ -242,7 +242,7 @@ impl App {
                 let Some(t) = Atlas::fetch(gpu, &mut self.atlas_tex, frame, &[template_probe(l)]) else { continue };
                 if confirm_template(&t, l) {
                     self.cur_layout = Some(*l);
-                    return Obs::Stats { banner: d.banner.unwrap(), rows: d.rows, hdr: d.hdr };
+                    return Obs::Stats { banner: d.banner.unwrap(), rows: d.rows };
                 }
             }
         }
@@ -268,7 +268,7 @@ impl App {
                         self.cache.insert((cb.w, cb.h), (d.layout.scale, d.layout.ox - cb.x as f64, d.layout.oy - cb.y as f64));
                         self.cur_layout = Some(d.layout);
                         wlog!("fallback search found panel: scale {:.3}", d.layout.scale);
-                        return Obs::Stats { banner: d.banner.unwrap(), rows: d.rows, hdr: d.hdr };
+                        return Obs::Stats { banner: d.banner.unwrap(), rows: d.rows };
                     }
                 }
             }
@@ -332,12 +332,16 @@ impl App {
         let dir = self.out_dir.clone();
         let ctl = self.ctl.0 as isize;
         let rgb = img.rgb;
+        let stem = {
+            let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+            png_out::screenshot_stem(t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond)
+        };
         self.saving.retain(|j| !j.is_finished());
         self.saving.push(std::thread::spawn(move || {
             lower_current_thread();
-            let res = png_out::save_rgb_atomic(&dir, w, h, &rgb);
+            let res = png_out::save_rgb_atomic(&dir, w, h, &rgb, &stem);
             let msg = Box::new(match res {
-                Ok((_, p)) => SavedMsg { ok: true, path: p },
+                Ok(p) => SavedMsg { ok: true, path: p },
                 Err(e) => {
                     wlog!("png save failed: {e}");
                     SavedMsg { ok: false, path: PathBuf::new() }
@@ -556,7 +560,7 @@ pub fn run() {
         let _ = GetMonitorInfoW(prim, &mut mi);
         let r = mi.rcMonitor;
 
-        let params = Params { stable_checks: cfg.stable_checks, bubble_wait_ms: cfg.bubble_wait_ms, close_checks: cfg.close_checks, max_capture_attempts: 3 };
+        let params = Params { close_checks: cfg.close_checks, max_capture_attempts: 3 };
         let cfg_capture = cfg.capture.clone();
         let mut a = Box::new(App {
             out_dir: cfg.resolve_output_dir(&exe_dir),

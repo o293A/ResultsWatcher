@@ -110,30 +110,15 @@ fn draw_cursor(img: &mut Image, x: i32, y: i32) {
 }
 
 #[test]
-fn survives_cursor_on_close_button_and_fake_season_bubble() {
+fn survives_cursor_on_close_button() {
     for (f, c) in [("victory_full.png", FULL), ("defeat_windowed.png", WIN)] {
         let mut img = fx(f);
         let l = Layout::predicted(&c, 1.0);
         let x = l.rect(CLOSE_X);
         draw_cursor(&mut img, x.x + 15, x.y + 10);
-        // Fake dark semi-transparent bubble over PING/KD columns and 1st row (measured 167x72).
-        let p = l.panel_rect();
-        img.darken_rect(Rect::new(p.x + 473, p.y + 233, 167, 72), 0.6);
-        let d = detect(&img, &c).unwrap_or_else(|| panic!("{} lost with cursor+bubble", f));
+        let d = detect(&img, &c).unwrap_or_else(|| panic!("{} lost with cursor", f));
         assert!(d.banner.is_some());
     }
-}
-
-#[test]
-fn bubble_changes_header_signature() {
-    let clean = fx("victory_full.png");
-    let mut dirty = clean.clone();
-    let l = Layout::predicted(&FULL, 1.0);
-    let p = l.panel_rect();
-    dirty.darken_rect(Rect::new(p.x + 473, p.y + 233, 167, 72), 0.6);
-    let a = stage2(&clean, &l).unwrap().hdr;
-    let b = stage2(&dirty, &l).unwrap().hdr;
-    assert_ne!(a, b);
 }
 
 #[test]
@@ -251,10 +236,9 @@ fn fallback_search_finds_unscaled_and_synthetic_scaled_panel() {
 }
 
 // ---------------- state machine ----------------
-fn stats(b: Banner, rows: bool, hdr: (u8, u16)) -> Obs {
-    Obs::Stats { banner: b, rows, hdr }
+fn stats(b: Banner, rows: bool) -> Obs {
+    Obs::Stats { banner: b, rows }
 }
-const H: (u8, u16) = (40, 120);
 
 #[test]
 fn state_one_capture_per_opening_and_close_cycle() {
@@ -265,29 +249,27 @@ fn state_one_capture_per_opening_and_close_cycle() {
         m.on_observation(o, t)
     };
     assert_eq!(step(&mut m, Obs::Absent), Action::None);
-    assert_eq!(step(&mut m, stats(Banner::Victory, true, H)), Action::None); // stabilizing 1
-    assert_eq!(step(&mut m, stats(Banner::Victory, true, H)), Action::None); // 2
-    assert_eq!(step(&mut m, stats(Banner::Victory, true, H)), Action::Capture); // 3
+    assert_eq!(step(&mut m, stats(Banner::Victory, true)), Action::Capture); // immediate, first observation
     assert_eq!(m.capture_result(true), Action::None);
     assert_eq!(m.state, State::Captured);
     for _ in 0..20 {
-        assert_eq!(step(&mut m, stats(Banner::Victory, true, H)), Action::None);
+        assert_eq!(step(&mut m, stats(Banner::Victory, true)), Action::None);
     }
     // tab switch to Rewards and back: no new capture
     for _ in 0..5 {
         assert_eq!(step(&mut m, Obs::Other), Action::None);
     }
-    assert_eq!(step(&mut m, stats(Banner::Victory, true, H)), Action::None);
+    assert_eq!(step(&mut m, stats(Banner::Victory, true)), Action::None);
     // a single cursor blip does not close
     assert_eq!(step(&mut m, Obs::Absent), Action::None);
-    assert_eq!(step(&mut m, stats(Banner::Victory, true, H)), Action::None);
+    assert_eq!(step(&mut m, stats(Banner::Victory, true)), Action::None);
     // 3 absent in a row -> hide
     assert_eq!(step(&mut m, Obs::Absent), Action::None);
     assert_eq!(step(&mut m, Obs::Absent), Action::None);
     assert_eq!(step(&mut m, Obs::Absent), Action::HideOverlay);
     // ready for the next game without restart
-    assert_eq!(step(&mut m, stats(Banner::Defeat, true, H)), Action::None);
-    assert_eq!(m.state, State::Stabilizing);
+    assert_eq!(step(&mut m, stats(Banner::Defeat, true)), Action::Capture);
+    assert_eq!(m.state, State::Capturing);
 }
 
 #[test]
@@ -301,32 +283,11 @@ fn rewards_tab_never_captures_until_stats() {
 }
 
 #[test]
-fn bubble_wait_is_capped_at_three_seconds() {
-    let mut m = Machine::new(Params::default());
-    let mut t = 0u64;
-    let mut captured_at = None;
-    // header signature keeps changing (animating bubble) every check
-    for i in 0..40u16 {
-        t += 330;
-        let o = stats(Banner::Victory, true, (40, i * 20));
-        if m.on_observation(o, t) == Action::Capture {
-            captured_at = Some(t);
-            break;
-        }
-    }
-    let at = captured_at.expect("must capture anyway");
-    assert!(at >= 3000 + 330 && at <= 3000 + 330 * 3, "captured at {}", at);
-}
-
-#[test]
 fn capture_retries_up_to_three_times_then_stops() {
     let mut m = Machine::new(Params::default());
     let mut t = 0;
-    let mut act = Action::None;
-    for _ in 0..3 {
-        t += 330;
-        act = m.on_observation(stats(Banner::Victory, true, H), t);
-    }
+    t += 330;
+    let act = m.on_observation(stats(Banner::Victory, true), t);
     assert_eq!(act, Action::Capture);
     assert_eq!(m.capture_result(false), Action::Capture);
     assert_eq!(m.capture_result(false), Action::Capture);
@@ -338,19 +299,17 @@ fn capture_retries_up_to_three_times_then_stops() {
 fn banner_flip_without_closing_is_a_new_game() {
     let mut m = Machine::new(Params::default());
     let mut t = 0;
-    for _ in 0..3 {
-        t += 330;
-        m.on_observation(stats(Banner::Victory, true, H), t);
-    }
+    t += 330;
+    assert_eq!(m.on_observation(stats(Banner::Victory, true), t), Action::Capture);
     m.capture_result(true);
     // 1-2 flips are noise, 3 in a row restart the search
     for _ in 0..2 {
         t += 330;
-        m.on_observation(stats(Banner::Defeat, true, H), t);
+        m.on_observation(stats(Banner::Defeat, true), t);
     }
     assert_eq!(m.state, State::Captured);
     t += 330;
-    m.on_observation(stats(Banner::Defeat, true, H), t);
+    m.on_observation(stats(Banner::Defeat, true), t);
     assert_eq!(m.state, State::Searching);
 }
 
@@ -413,11 +372,10 @@ fn config_defaults_and_parse() {
     let c = Config::parse("");
     assert_eq!(c.esc_count, 3);
     assert!(!c.esc_only_when_roblox_focused);
-    let c = Config::parse("# x\noutput_dir = \"C:/shots\"\npoll_hz = 2\nesc_only_when_roblox_focused = true\nstable_checks = 99\n");
+    let c = Config::parse("# x\noutput_dir = \"C:/shots\"\npoll_hz = 2\nesc_only_when_roblox_focused = true\n");
     assert_eq!(c.output_dir, "C:/shots");
     assert_eq!(c.poll_hz, 2.0);
     assert!(c.esc_only_when_roblox_focused);
-    assert_eq!(c.stable_checks, 5);
 }
 
 #[test]
@@ -425,15 +383,14 @@ fn png_sequence_atomic_no_overwrite() {
     let dir = std::env::temp_dir().join(format!("rw_test_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("7.png"), b"x").unwrap();
     std::fs::write(dir.join("notes.txt"), b"x").unwrap();
     let rgb = vec![128u8; 4 * 3 * 3];
-    let (n, p) = png_out::save_rgb_atomic(&dir, 4, 3, &rgb).unwrap();
-    assert_eq!(n, 8);
-    assert!(p.ends_with("8.png"));
-    let (n2, _) = png_out::save_rgb_atomic(&dir, 4, 3, &rgb).unwrap();
-    assert_eq!(n2, 9);
-    assert!(std::fs::read(dir.join("7.png")).unwrap() == b"x");
+    let stem = png_out::screenshot_stem(2026, 10, 6, 7, 3, 59);
+    assert_eq!(stem, "Screenshot_2026-10-06_070359");
+    let p = png_out::save_rgb_atomic(&dir, 4, 3, &rgb, &stem).unwrap();
+    assert!(p.ends_with("Screenshot_2026-10-06_070359.png"));
+    let p2 = png_out::save_rgb_atomic(&dir, 4, 3, &rgb, &stem).unwrap(); // same second: never overwrite
+    assert!(p2.ends_with("Screenshot_2026-10-06_070359 (2).png"));
     assert!(!std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".tmp")));
     let back = Image::from_png_file(&p).unwrap();
     assert_eq!((back.w, back.h), (4, 3));
@@ -466,17 +423,17 @@ fn thumbnail_keeps_aspect_ratio_and_averages() {
 }
 
 #[test]
-fn leaving_stats_before_capture_never_captures() {
+fn capture_is_immediate_and_needs_stats_with_a_player_row() {
     let mut m = Machine::new(Params::default());
-    m.on_observation(stats(Banner::Victory, true, H), 0);
-    m.on_observation(stats(Banner::Victory, true, H), 330);
-    // user clicks Rewards just before the 3rd check: no capture, back to searching
-    assert_eq!(m.on_observation(Obs::Other, 660), Action::None);
-    assert_eq!(m.state, State::Searching);
+    // Stats tab but no player row yet: wait, never capture.
+    assert_eq!(m.on_observation(stats(Banner::Victory, false), 0), Action::None);
+    // Rewards tab: never captures.
     for i in 0..50 {
         assert_eq!(m.on_observation(Obs::Other, 1000 + i * 330), Action::None);
     }
     assert_eq!(m.state, State::Searching);
+    // First Stats observation with a row: captured at once.
+    assert_eq!(m.on_observation(stats(Banner::Victory, true), 20_000), Action::Capture);
 }
 
 #[test]

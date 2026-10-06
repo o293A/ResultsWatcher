@@ -10,10 +10,6 @@ pub struct Config {
     pub output_dir: String,
     /// Detection passes per second while Roblox is in the foreground.
     pub poll_hz: f64,
-    /// Number of consecutive identical checks before capturing (2..3).
-    pub stable_checks: u8,
-    /// Max wait (ms) for the tooltip bubble to settle before capturing anyway.
-    pub bubble_wait_ms: u64,
     /// Consecutive absent checks that mean "panel closed".
     pub close_checks: u8,
     /// Overlay margin to the right screen edge, in reference pixels (scaled with resolution).
@@ -28,7 +24,7 @@ pub struct Config {
     /// Rare full-frame fallback search (multi-scale) when the predicted position fails.
     pub fallback_search: bool,
     pub roblox_process: String,
-    /// "duplication" (default, never a yellow border), "window" or "monitor" (Windows Graphics Capture).
+    /// "window" (default) or "monitor" (Windows Graphics Capture, mouse cursor excluded), or "duplication" (DXGI Desktop Duplication).
     pub capture: String,
     /// Cap of watcher.log in KiB (rotated to watcher.log.1).
     pub log_max_kb: u64,
@@ -39,8 +35,6 @@ impl Default for Config {
         Config {
             output_dir: "screens".into(),
             poll_hz: 3.0,
-            stable_checks: 3,
-            bubble_wait_ms: 3000,
             close_checks: 3,
             overlay_margin: 24,
             overlay_scale: 1.0,
@@ -49,7 +43,7 @@ impl Default for Config {
             esc_only_when_roblox_focused: false,
             fallback_search: true,
             roblox_process: "RobloxPlayerBeta.exe".into(),
-            capture: "duplication".into(),
+            capture: "window".into(),
             log_max_kb: 256,
         }
     }
@@ -65,8 +59,6 @@ impl Config {
             match k {
                 "output_dir" => c.output_dir = v.to_string(),
                 "poll_hz" => c.poll_hz = v.parse().unwrap_or(c.poll_hz).clamp(0.5, 10.0),
-                "stable_checks" => c.stable_checks = v.parse().unwrap_or(c.stable_checks).clamp(2, 5),
-                "bubble_wait_ms" => c.bubble_wait_ms = v.parse().unwrap_or(c.bubble_wait_ms).min(10_000),
                 "close_checks" => c.close_checks = v.parse().unwrap_or(c.close_checks).clamp(2, 10),
                 "overlay_margin" => c.overlay_margin = v.parse().unwrap_or(c.overlay_margin).clamp(0, 400),
                 "overlay_scale" => c.overlay_scale = v.parse().unwrap_or(c.overlay_scale).clamp(0.5, 3.0),

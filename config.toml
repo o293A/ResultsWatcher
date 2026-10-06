@@ -1,8 +1,6 @@
 # Optional. Every key has a working default; delete the file to use defaults.
 output_dir = "screens"          # relative to the exe, or an absolute path
 poll_hz = 3                     # detection passes per second (only while Roblox is foreground)
-stable_checks = 3               # identical checks before capturing (2..5)
-bubble_wait_ms = 3000           # max wait for the "Season..." bubble to settle
 close_checks = 3                # absent checks that mean "panel closed"
 overlay_margin = 24             # px from the right edge at 1080p (scales with resolution)
 overlay_scale = 1.0
@@ -12,4 +10,4 @@ esc_only_when_roblox_focused = false
 fallback_search = true
 roblox_process = "RobloxPlayerBeta.exe"
 log_max_kb = 256
-capture = "duplication"          # duplication = never a yellow border | window | monitor (Windows Graphics Capture)
+capture = "window"               # window (default) | monitor = Windows Graphics Capture, mouse cursor never captured | duplication
