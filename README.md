@@ -201,13 +201,25 @@ There is no guarantee about how any game's anti-cheat or terms of service treat 
 
 ## Build from source
 
+Building it yourself takes two steps: install Rust once, then double-click `build_windows.bat`.
+
 ### Requirements
 
 - Windows 10/11, 64-bit
-- [Rust](https://rustup.rs/) (stable) with the `x86_64-pc-windows-msvc` target (the default on Windows)
-- Visual Studio Build Tools with the "Desktop development with C++" workload (required by Rust's MSVC toolchain)
+- [Rust](https://rustup.rs/) (stable). Installing it is what gives you the `cargo` command. The `x86_64-pc-windows-msvc` target is the default on Windows.
+- Visual Studio Build Tools with the "Desktop development with C++" workload (the Rust installer offers to set it up; it is required by Rust's MSVC toolchain)
 
-### Steps
+### Quick way (recommended)
+
+1. Install Rust from [rustup.rs](https://rustup.rs/) (this makes the `cargo` command available). If a terminal was already open, close it and open a new one afterwards.
+2. Download or clone this repository.
+3. Double-click **`build_windows.bat`**.
+
+The script runs `cargo build --release`, copies the result to **`ResultsWatcher.exe`** in the project folder, then permanently deletes the temporary `target` folder (several hundred MB) to leave nothing behind. If the build fails, the window stays open with an error message.
+
+`ResultsWatcher.exe` is a single self-contained file: you can move it anywhere you want, nothing else is needed. `screens\` and `watcher.log` are created next to it on first launch, and `config.toml` stays optional.
+
+### Manual way
 
 ```powershell
 git clone https://github.com/YOUR-USERNAME/ResultsWatcher.git
@@ -215,9 +227,9 @@ cd ResultsWatcher
 cargo build --release
 ```
 
-The executable is created at `target\release\ResultsWatcher.exe`. It is a single self-contained file.
+The executable is created at `target\release\ResultsWatcher.exe`. To run it: `.\target\release\ResultsWatcher.exe`
 
-To run it: `.\target\release\ResultsWatcher.exe`
+Note: `build_windows.bat` deletes `target`, so use the manual way if you want to keep incremental build files (for example while developing or running `cargo test --release`).
 
 ---
 
@@ -252,6 +264,7 @@ Because the executable uses the Windows GUI subsystem, PowerShell may print the 
 ResultsWatcher/
 |-- Cargo.toml              Project and release profile (LTO, strip, panic=abort)
 |-- Cargo.lock              Locked dependency versions
+|-- build_windows.bat       One-click release build (outputs ResultsWatcher.exe)
 |-- config.toml             Sample configuration (optional)
 |-- README.md
 |-- src/
